@@ -50,26 +50,44 @@ router.get('/search', async (req, res) => {
 // GET all products with filters
 router.get('/', async (req, res) => {
   try {
-    const { brand, minPrice, category , maxPrice, size } = req.query;
+    const { brand, category, minPrice, maxPrice, size, search } = req.query;
     
     // Build filter object dynamically
     let filter = {};
+    let andConditions = [];
     
-    if (brand) filter.brand = brand;
+    // Add search filter if provided (check for non-empty string)
+    if (search && search.trim() !== '') {
+      const searchRegex = new RegExp(search, 'i');
+      andConditions.push({
+        $or: [
+          { name: searchRegex },
+          { brand: searchRegex },
+          { category: searchRegex },
+          { description: searchRegex },
+        ]
+      });
+    }
+    
+    if (brand) {
+      andConditions.push({ brand: brand });
+    }
     if (category) {
-      const normalizedCategory = String(category).trim();
-      if (normalizedCategory) {
-        // Case-insensitive exact match to tolerate stored casing/spacing differences
-        filter.category = new RegExp(`^${escapeRegex(normalizedCategory)}$`, 'i');
-      }
+      andConditions.push({ category: category });
     }
     if (minPrice || maxPrice) {
-      filter.price = {};
-      if (minPrice) filter.price.$gte = Number(minPrice);
-      if (maxPrice) filter.price.$lte = Number(maxPrice);
+      const priceFilter = {};
+      if (minPrice) priceFilter.$gte = Number(minPrice);
+      if (maxPrice) priceFilter.$lte = Number(maxPrice);
+      andConditions.push({ price: priceFilter });
     }
     if (size) {
-      filter['sizes.size'] = Number(size);
+      andConditions.push({ 'sizes.size': Number(size) });
+    }
+
+    // Combine all conditions with $and if there are any
+    if (andConditions.length > 0) {
+      filter.$and = andConditions;
     }
 
     const products = await Product.find(filter);
@@ -77,13 +95,13 @@ router.get('/', async (req, res) => {
     res.json({
       success: true,
       count: products.length,
-      data: products
+      data: products,
     });
   } catch (error) {
     res.status(500).json({
       success: false,
       message: 'Server Error',
-      error: error.message
+      error: error.message,
     });
   }
 });
